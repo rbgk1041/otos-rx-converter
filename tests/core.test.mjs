@@ -1,0 +1,13 @@
+import test from'node:test';import assert from'node:assert/strict';import{match,parse,warnings,validate}from'../core.mjs';import{createRequire}from'node:module';const require=createRequire(import.meta.url);const ExcelJS=require('../vendor/exceljs.cjs');
+const a={center:'센터',team:'팀',name:'가상',empId:'0001',category:'도수'};const eye={sph:'-1.00',cyl:'-0.50',axis:'180',pd:'31',add:'1.00'};const v={...a,od:{...eye},os:{...eye,pd:'32'}};const run=(aa=[a],vv=[v])=>match({applicants:aa,visions:vv});
+test('normal preserves ID and sums PD',()=>{const r=run().output[0];assert.equal(r.pd,'63');assert.equal(r.empId,'0001');assert.deepEqual(warnings(r),[])});
+test('vision duplicates remain visible',()=>{const r=run([a],[v,v]);assert.equal(r.output.length,0);assert.equal(r.blocked.length,1)});
+test('applicant duplicates cannot export',()=>{const r=run([a,a]);assert.equal(r.output.length,0);assert.equal(r.blocked.length,2)});
+test('ADD numeric equivalence',()=>assert.equal(run([a],[{...v,od:{...eye,add:'1'}}]).output[0].notices.length,0));
+test('PD greater than 90 flagged',()=>{const r=run([a],[{...v,od:{...eye,pd:'64'},os:{...eye,pd:'64'}}]).output[0];assert.equal(r.pd,'64');assert(warnings(r).length)});
+test('editing triggers validation',()=>{const r=run().output[0];r.axisR='999';assert(validate(r).length);r.ack=true;assert(warnings(r).length);r.axisR='90';assert.equal(warnings(r).length,0)});
+function workbook(rows){const w=new ExcelJS.Workbook;const aa=w.addWorksheet('보안경명단');aa.getRow(4).values=['센터','팀','사번','성명','구분'];aa.getRow(5).values=['센터','팀','001','가상','도수'];const vv=w.addWorksheet('시력데이터');vv.getRow(3).values=['센터명','성명','팀','구분','SPH','CYL','AXIS','P.D','ADD'];rows.forEach((r,i)=>vv.getRow(i+4).values=r);return w}
+test('missing eye does not consume next person',()=>{const p=parse(workbook([['센터','가상','팀','OD','-1','','','31',''],['센터','다른사람','팀','OD','-2','','','32',''],['','','','OS','-3','','','33','']]));assert.equal(p.visions.length,2);assert.equal(p.visions[0].os,undefined);assert.equal(p.visions[1].os.sph,'-3')});
+test('reversed eye pair supported',()=>{const p=parse(workbook([['센터','가상','팀','OS','-2','','','32',''],['','','','OD','-1','','','31','']]));assert.equal(p.visions[0].od.sph,'-1')});
+test('missing header rejected',()=>{const w=workbook([]);w.worksheets[0].getRow(4).getCell(1).value='잘못된열';assert.throws(()=>parse(w),/필요한 열/)});
+test('xlsx roundtrip preserves text ID',async()=>{const w=workbook([]),bytes=await w.xlsx.writeBuffer(),r=new ExcelJS.Workbook;await r.xlsx.load(bytes);assert.equal(r.worksheets[0].getRow(5).getCell(3).value,'001')});
